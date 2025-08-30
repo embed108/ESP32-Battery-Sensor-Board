@@ -1,0 +1,75 @@
+/*
+ Assignment Solution Code
+ ESP32 + Soil Moisture Sensor + pH Sensor + External Bluetooth (HC-05)
+ Power Management: TPS22918 load-switch for HC-05, TPS62740 buck regulator supplies 3.3V
+ Deep Sleep Mode
+*/
+
+#include <HardwareSerial.h>
+
+// --- Pin Configuration ---
+const int MOISTURE_PIN = 34;   // ADC1_CH6
+const int PH_PIN       = 35;   // ADC1_CH7
+const int HC05_EN_PIN  = 25;   // GPIO controlling TPS22918 EN (HC-05 VCC switch)
+const int DIV_EN_PIN   = 26;   // Reserved GPIO (optional use for divider MOSFET / sensor VCC gating)
+
+// --- UART for HC-05 ---
+HardwareSerial BTSerial(2); // UART2: RX=16, TX=17
+
+// --- Sleep interval ---
+const uint64_t WAKE_INTERVAL_SEC = 600; // 10 minutes
+
+void setup() {
+  Serial.begin(115200);
+  delay(500);
+  Serial.println("ESP32 Assignment Device Booting...");
+
+  // Setup pins
+  pinMode(HC05_EN_PIN, OUTPUT);
+  pinMode(DIV_EN_PIN, OUTPUT);
+  digitalWrite(DIV_EN_PIN, LOW); // keep OFF by default
+
+  // Power ON HC-05 via TPS22918
+  digitalWrite(HC05_EN_PIN, HIGH);
+  delay(300); // wait for HC-05 to boot
+
+  // Start UART2 for HC-05 (GPIO16=RX2, GPIO17=TX2)
+  BTSerial.begin(9600, SERIAL_8N1, 16, 17);
+  Serial.println("HC-05 powered ON and UART2 started");
+
+  // --- Acquire Soil Moisture ---
+  int moistureRaw = analogRead(MOISTURE_PIN);
+  float moistureVolt = (moistureRaw * 3.3) / 4095.0;
+
+  // --- Acquire pH Sensor ---
+  int phRaw = analogRead(PH_PIN);
+  float phVolt = (phRaw * 3.3) / 4095.0;
+  float phValue = (phVolt / 3.0) * 14.0; // simple linear mapping (0-3V = pH 0-14)
+
+  // --- Print to Serial ---
+  Serial.println("===== Sensor Readings =====");
+  Serial.printf("Moisture Raw: %d | Voltage: %.2f V\n", moistureRaw, moistureVolt);
+  Serial.printf("pH Raw: %d       | Voltage: %.2f V | pH Value: %.2f\n", phRaw, phVolt, phValue);
+
+  // --- Send via HC-05 Bluetooth ---
+  String payload = "Moisture:" + String(moistureRaw) +
+                   ", pH:" + String(phValue, 2);
+  BTSerial.println(payload);
+
+  Serial.println("Data sent via HC-05: " + payload);
+
+  delay(2000); // allow transmission to complete
+
+  // --- Power OFF HC-05 before Deep Sleep ---
+  digitalWrite(HC05_EN_PIN, LOW);
+  digitalWrite(DIV_EN_PIN, LOW); // ensure OFF before sleep
+
+  // --- Enter Deep Sleep ---
+  Serial.println("Entering Deep Sleep for " + String(WAKE_INTERVAL_SEC) + " seconds...");
+  esp_sleep_enable_timer_wakeup(WAKE_INTERVAL_SEC * 1000000ULL);
+  esp_deep_sleep_start();
+}
+
+void loop() {
+  // Not used - ESP32 sleeps after setup
+}
